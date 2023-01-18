@@ -145,18 +145,6 @@ add_compile_options(
     -Os>>
 )
 
-# Пример подключения библиотек
-# Для Windows
-if (WIN32)
-    # Подключение библиотек
-    target_link_libraries(${PROJECT_NAME} ws2_32)
-    target_link_libraries(${PROJECT_NAME} wsock32)
-    target_link_libraries(${PROJECT_NAME} pthread)
-endif ()
 
-# Для Linux
-if (UNIX)
-    target_link_libraries(${PROJECT_NAME} pthread)
-endif ()
 
                     
