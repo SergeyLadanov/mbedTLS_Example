@@ -23,8 +23,6 @@ set(
     Core/Inc
 )
 
-set(TestList)
-
 # Получение списка папок в заданном каталоге
 macro(__Get_DirectorytList result curdir)
     file(GLOB children RELATIVE ${curdir} ${curdir}/*)
@@ -32,22 +30,13 @@ macro(__Get_DirectorytList result curdir)
     foreach(child ${children})
         if(IS_DIRECTORY ${curdir}/${child})
             
-
             file(READ Components/${child}/CMakeLists.txt text)
-            string(REGEX MATCH "[D,d][e,E][p,P][e,E][n,N][d,D][s,S]_[o,O][n,N]\\([^\\n]*\\)" out_var ${text})
+            string(REGEX MATCHALL "[D,d][e,E][p,P][e,E][n,N][d,D][s,S]_[o,O][n,N]\\([^ ]*\\)" out_var ${text})
             string(REGEX REPLACE "\"|\\(|\\)|[D,d][e,E][p,P][e,E][n,N][d,D][s,S]_[o,O][n,N]" "" out_var "${out_var}")
-
+            string(REPLACE "\n" ";" out_var "${out_var}")
             foreach(item ${out_var})
-                if (out_var)
-                    list(FIND dirlist "${out_var}" res)
-                    if (res GREATER_EQUAL 0)
-                        message("Dependence already included")
-                    else()
-                        message("Add new dependency \"${out_var}\"")
-                        list(APPEND dirlist "${out_var}")
-                    endif()
-                endif()
-                message("Result \"${out_var}\"")
+                list(INSERT dirlist 0 ${item})
+                message("Inserted dependency \"${item}\"")
             endforeach()
 
             list(FIND dirlist ${child} res)
@@ -61,6 +50,8 @@ macro(__Get_DirectorytList result curdir)
             
         endif()
     endforeach()
+    message("Removing dublicates")
+    list(REMOVE_DUPLICATES  dirlist)
     message("List final \"${dirlist}\"")
     set(${result} ${dirlist})
 endmacro()
