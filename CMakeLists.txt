@@ -20,7 +20,6 @@ FILE(
     GLOB 
     Sources 
     "Core/Src/*.cpp"
-    "Core/Src/*.c"
     )
 
 # Директории с заголовочными файлами

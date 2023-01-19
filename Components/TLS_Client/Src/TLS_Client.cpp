@@ -1,11 +1,5 @@
 #include "TLS_Client.hpp"
 
-#include "mbedtls/net_sockets.h"
-#include "mbedtls/debug.h"
-#include "mbedtls/ssl.h"
-#include "mbedtls/entropy.h"
-#include "mbedtls/ctr_drbg.h"
-#include "mbedtls/error.h"
 
 #define ERROR_CREATE_THREAD -11
 #define ERROR_JOIN_THREAD   -12
@@ -14,6 +8,19 @@
 #ifndef UNUSED
 #define UNUSED(X) (void)X
 #endif
+
+#define mbedtls_printf printf
+#define mbedtls_fprintf    fprintf
+
+static void my_debug(void *ctx, int level,
+                     const char *file, int line,
+                     const char *str)
+{
+    ((void) level);
+
+    mbedtls_fprintf((FILE *) ctx, "%s:%04d: %s", file, line, str);
+    fflush((FILE *) ctx);
+}
 
 
 void TLS_Client::error(const char *msg)
@@ -41,34 +48,76 @@ int TLS_Client::Connect(const char *host, uint16_t port)
     int status = 0;
     struct sockaddr_in serv_addr;
     char *IP = nullptr;
+    const char *pers = "ssl_client1";
+    int ret;
+
+    char port_str[16];
+
+    snprintf(port_str, sizeof(port_str), "%d", port);
+
+
+    mbedtls_entropy_init(&Hclient.entropy);
+    if ((ret = mbedtls_ctr_drbg_seed(&Hclient.ctr_drbg, mbedtls_entropy_func, &Hclient.entropy,
+                                     (const unsigned char *) pers,
+                                     strlen(pers))) != 0) {
+        mbedtls_printf(" failed\n  ! mbedtls_ctr_drbg_seed returned %d\n", ret);
+    }
+
 
     printf("Trying to connect to %s:%d...\r\n", host, port);
 
-    Hclient.Fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (Hclient.Fd < 0)
-	{
-		error("ERROR opening socket");
-	}
-
-    memset((char *) &serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    IP = DomainIP(host);
-
-    if (!IP)
+    if ((ret = mbedtls_net_connect(&Hclient.Context, host,
+                                   port_str, MBEDTLS_NET_PROTO_TCP)) != 0) {
+        mbedtls_printf(" failed\n  ! mbedtls_net_connect returned %d\n\n", ret);
+    }
+    else
     {
-        Hclient.Fd = INVALID_SOCKET;
-        return -1;
+        mbedtls_printf("Connect ok\r\n");
     }
 
-	serv_addr.sin_addr.s_addr = inet_addr(IP);
-    serv_addr.sin_port = htons(port);
 
-    if (connect(Hclient.Fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
-	{
-        Hclient.Fd = INVALID_SOCKET;
-        printf("ERROR connecting!\r\n");
-        return -1;
-	}
+        fflush(stdout);
+
+    if ((ret = mbedtls_ssl_config_defaults(&Hclient.conf,
+                                           MBEDTLS_SSL_IS_CLIENT,
+                                           MBEDTLS_SSL_TRANSPORT_STREAM,
+                                           MBEDTLS_SSL_PRESET_DEFAULT)) != 0) {
+        mbedtls_printf(" failed\n  ! mbedtls_ssl_config_defaults returned %d\n\n", ret);
+    }
+
+    mbedtls_printf(" ok\n");
+
+    /* OPTIONAL is not optimal for security,
+     * but makes interop easier in this simplified example */
+    mbedtls_ssl_conf_authmode(&Hclient.conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
+    mbedtls_ssl_conf_rng(&Hclient.conf, mbedtls_ctr_drbg_random, &Hclient.ctr_drbg);
+    mbedtls_ssl_conf_dbg(&Hclient.conf, my_debug, stdout);
+
+    if ((ret = mbedtls_ssl_setup(&Hclient.ssl, &Hclient.conf)) != 0) {
+        mbedtls_printf(" failed\n  ! mbedtls_ssl_setup returned %d\n\n", ret);
+    }
+
+    if ((ret = mbedtls_ssl_set_hostname(&Hclient.ssl, host)) != 0) {
+        mbedtls_printf(" failed\n  ! mbedtls_ssl_set_hostname returned %d\n\n", ret);
+    }
+
+    mbedtls_ssl_set_bio(&Hclient.ssl, &Hclient.Context, mbedtls_net_send, mbedtls_net_recv, NULL);
+
+    /*
+     * 4. Handshake
+     */
+    mbedtls_printf("  . Performing the SSL/TLS handshake...");
+    fflush(stdout);
+
+    while ((ret = mbedtls_ssl_handshake(&Hclient.ssl)) != 0) {
+        if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            mbedtls_printf(" failed\n  ! mbedtls_ssl_handshake returned -0x%x\n\n",
+                           (unsigned int) -ret);
+        }
+    }
+
+    mbedtls_printf(" ok\n");
+
     
     pthread_mutex_init(&Hclient.Mutex, NULL);
 
@@ -79,42 +128,60 @@ int TLS_Client::Connect(const char *host, uint16_t port)
         #if defined(_WIN32) || defined(_WIN64)
         int err;
         #endif
+        int len = 0;
+        int ret = 0;
         hcl->KeepLooping = true;
         printf("Receive thread was started\r\n");
 
         do
         {
-            int read = recv(hcl->Fd, buf, BUFFER_SIZE, 0);
 
-            pthread_mutex_lock(&hcl->Mutex);
 
-            if (read == 0)
-            {
-                pthread_mutex_unlock(&hcl->Mutex);
+            len = sizeof(buf) - 1;
+            memset(buf, 0, sizeof(buf));
+            ret = mbedtls_ssl_read(&hcl->ssl, (unsigned char *) buf, len);
+
+            if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                continue;
+            }
+
+            if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
                 break;
             }
 
-            if (read == SOCKET_ERROR)
-            {
-                #if defined(_WIN32) || defined(_WIN64)
-                err = WSAGetLastError();
-                if ((err != WSAENOTCONN) && (err != WSAECONNABORTED) && (err == WSAECONNRESET))
-                    printf("Errore nella lettura dal client\n");
-                #endif
-                pthread_mutex_unlock(&hcl->Mutex);
+            if (ret < 0) {
+                mbedtls_printf("failed\n  ! mbedtls_ssl_read returned %d\n\n", ret);
                 break;
             }
 
-            hcl->Observer->OnTcpReceived(hcl->Self, (uint8_t *)buf, read);
+            if (ret == 0) {
+                mbedtls_printf("\n\nEOF\n\n");
+                break;
+            }
+
+            len = ret;
+            mbedtls_printf(" %d bytes read\n\n%s", len, (char *) buf);
+
+            if (hcl->Observer)
+            {
+                hcl->Observer->OnTcpReceived(hcl->Self, (uint8_t *)buf, len);
+            }
+
             pthread_mutex_unlock(&hcl->Mutex);
         }
         while (hcl->KeepLooping);
-        #if defined(_WIN32) || defined(_WIN64)//Windows includes
-        closesocket(hcl->Fd);
-        #else
-        close(hcl->Fd);
-        #endif
-        hcl->Fd = INVALID_SOCKET;
+
+
+        mbedtls_ssl_close_notify(&hcl->ssl);
+
+        mbedtls_net_free(&hcl->Context);
+
+        mbedtls_ssl_free(&hcl->ssl);
+        mbedtls_ssl_config_free(&hcl->conf);
+        mbedtls_ctr_drbg_free(&hcl->ctr_drbg);
+        mbedtls_entropy_free(&hcl->entropy);
+
+        hcl->Context.fd = SOCKET_ERROR;
 
         printf("Receive thread was stopped\r\n");
 
@@ -184,28 +251,16 @@ int TLS_Client::Send(uint8_t *data, uint32_t len)
 {
     char *pbuf = (char *) data;
     int err = 0;
+    int ret = 0;
 
-    do
+
+    while ((ret = mbedtls_ssl_write(&Hclient.ssl, data, len)) <= 0) 
     {
-        int sent = send(Hclient.Fd, (char *) data, len, 0);
-        if (sent == SOCKET_ERROR)
+        if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
         {
-            #if defined(_WIN32) || defined(_WIN64)
-            err = WSAGetLastError();
-            if ((err != WSAENOTCONN) && (err != WSAECONNABORTED) && (err == WSAECONNRESET))
-            {
-                printf("Errore nella scrittura verso il client");
-            }
-            #else
-            err = -1;
-            #endif
-            Hclient.KeepLooping = false;
-            break;
+            mbedtls_printf(" failed\n  ! mbedtls_ssl_write returned %d\n\n", ret);
         }
-
-        pbuf += sent;
-        len -= sent;
     }
-    while (len > 0);
+
     return err;
 }

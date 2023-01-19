@@ -7,6 +7,13 @@
 //#include <winsock.h>
 #include <cstdio>
 
+#include "mbedtls/net_sockets.h"
+#include "mbedtls/debug.h"
+#include "mbedtls/ssl.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/error.h"
+
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -48,11 +55,12 @@ private:
 
     struct ClientArg
     {
-        #if defined(_WIN32) || defined(_WIN64)
-        SOCKET Fd;
-        #else
-        int Fd;
-        #endif
+        mbedtls_net_context Context;
+        mbedtls_entropy_context entropy;
+        mbedtls_ctr_drbg_context ctr_drbg;
+        mbedtls_ssl_context ssl;
+        mbedtls_ssl_config conf;
+
         IObserver *Observer;
         bool KeepLooping;
         pthread_mutex_t Mutex;
@@ -61,22 +69,27 @@ private:
 
         bool IsConnected()
         {
-            return (Fd != INVALID_SOCKET);
+            return (Context.fd != SOCKET_ERROR);
         }
     };
 
     pthread_t ReceiveTask;
     pthread_t PollTask;
 
-    ClientArg Hclient = {INVALID_SOCKET, nullptr, false};
+    ClientArg Hclient;
     
 
 public:
     TLS_Client()
     {
         memset(&Hclient, 0, sizeof(ClientArg));
-        Hclient.Fd = INVALID_SOCKET;
+        Hclient.Context.fd = SOCKET_ERROR;
         Hclient.Self = this;
+
+        mbedtls_net_init(&Hclient.Context);
+        mbedtls_ssl_init(&Hclient.ssl);
+        mbedtls_ssl_config_init(&Hclient.conf);
+        mbedtls_ctr_drbg_init(&Hclient.ctr_drbg);
     }
     int Connect(const char *host, uint16_t port);
     bool IsConnected(void);
@@ -87,12 +100,12 @@ public:
     }
     void Disconnect(void)
     {
-#if defined(_WIN32) || defined(_WIN64)//Windows includes
-        closesocket(Hclient.Fd);
-#else
-        close(Hclient.Fd);
-#endif
-        Hclient.Fd = INVALID_SOCKET;
+// #if defined(_WIN32) || defined(_WIN64)//Windows includes
+//         closesocket(Hclient.Context.fd);
+// #else
+//         close(Hclient.Fd);
+// #endif
+        Hclient.Context.fd = SOCKET_ERROR;
         Hclient.KeepLooping = false;
     }
 private:
