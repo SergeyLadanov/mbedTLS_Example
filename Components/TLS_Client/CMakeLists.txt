@@ -25,7 +25,7 @@ include_directories(
 add_library(${COMPONENT_NAME} STATIC ${SOURCE_LIB})
 
 
-Depends_On("mdedTLS")
+Depends_On("mbedTLS")
 
 # Пример подключения библиотек
 # Для Windows
