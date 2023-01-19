@@ -109,12 +109,17 @@ int TLS_Client::Connect(const char *host, uint16_t port)
     mbedtls_printf("  . Performing the SSL/TLS handshake...");
     fflush(stdout);
 
-    while ((ret = mbedtls_ssl_handshake(&Hclient.ssl)) != 0) {
+    if ((ret = mbedtls_ssl_handshake(&Hclient.ssl)) != 0) {
         if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             mbedtls_printf(" failed\n  ! mbedtls_ssl_handshake returned -0x%x\n\n",
                            (unsigned int) -ret);
         }
+
+        status = -1;
+        mbedtls_ssl_close_notify(&Hclient.ssl);
     }
+    else
+    {
 
     mbedtls_printf(" ok\n");
 
@@ -146,14 +151,16 @@ int TLS_Client::Connect(const char *host, uint16_t port)
             }
 
             if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
-
+                hcl->KeepLooping = false;
             }
             else if (ret < 0) {
                 mbedtls_printf("failed\n  ! mbedtls_ssl_read returned %d\n\n", ret);
+                hcl->KeepLooping = false;
             }
 
             else if (ret == 0) {
                 mbedtls_printf("\n\nEOF\n\n");
+                hcl->KeepLooping = false;
             }
             else
             {
@@ -169,7 +176,7 @@ int TLS_Client::Connect(const char *host, uint16_t port)
         }
         while (hcl->KeepLooping);
 
-
+        
         mbedtls_ssl_close_notify(&hcl->ssl);
 
         mbedtls_net_free(&hcl->Context);
@@ -201,7 +208,7 @@ int TLS_Client::Connect(const char *host, uint16_t port)
         ClientArg *hcl = (ClientArg *) args;
         printf("Poll thread was started\r\n");
 
-        while(hcl->IsConnected())
+        while(hcl->KeepLooping)
         {
             sleep(1);
             pthread_mutex_lock(&hcl->Mutex);
@@ -236,6 +243,8 @@ int TLS_Client::Connect(const char *host, uint16_t port)
         Hclient.Observer->OnTcpConnected(this);
     }
 
+    
+    }
     return status;
 }
 
