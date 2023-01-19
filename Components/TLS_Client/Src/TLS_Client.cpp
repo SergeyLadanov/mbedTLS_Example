@@ -146,27 +146,25 @@ int TLS_Client::Connect(const char *host, uint16_t port)
             }
 
             if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
-                break;
-            }
 
-            if (ret < 0) {
+            }
+            else if (ret < 0) {
                 mbedtls_printf("failed\n  ! mbedtls_ssl_read returned %d\n\n", ret);
-                break;
             }
 
-            if (ret == 0) {
+            else if (ret == 0) {
                 mbedtls_printf("\n\nEOF\n\n");
-                break;
             }
-
-            len = ret;
-            mbedtls_printf(" %d bytes read\n\n%s", len, (char *) buf);
-
-            if (hcl->Observer)
+            else
             {
-                hcl->Observer->OnTcpReceived(hcl->Self, (uint8_t *)buf, len);
-            }
+                len = ret;
+                mbedtls_printf(" %d bytes read\n\n%s", len, (char *) buf);
 
+                if (hcl->Observer)
+                {
+                    hcl->Observer->OnTcpReceived(hcl->Self, (uint8_t *)buf, len);
+                }
+            }
             pthread_mutex_unlock(&hcl->Mutex);
         }
         while (hcl->KeepLooping);

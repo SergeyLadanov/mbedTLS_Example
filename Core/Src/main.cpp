@@ -9,8 +9,9 @@ int main(void)
     int len = strlen(GET_REQUEST);
     Test.Connect("ya.ru", 443);
     Test.Send((uint8_t *) GET_REQUEST, len);
-    sleep(5);
+    sleep(2);
     Test.Disconnect();
+    sleep(2);
 
     return 0;
 }

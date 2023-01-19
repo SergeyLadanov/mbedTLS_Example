@@ -105,8 +105,9 @@ public:
 // #else
 //         close(Hclient.Fd);
 // #endif
-        Hclient.Context.fd = SOCKET_ERROR;
+        mbedtls_ssl_close_notify(&Hclient.ssl);
         Hclient.KeepLooping = false;
+        Hclient.Context.fd = SOCKET_ERROR;
     }
 private:
     static char* DomainIP(const char *domain);
