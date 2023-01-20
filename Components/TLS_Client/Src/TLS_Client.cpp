@@ -123,6 +123,13 @@ int TLS_Client::Connect(const char *host, uint16_t port)
 
         status = -1;
         mbedtls_ssl_close_notify(&Hclient.ssl);
+      
+        mbedtls_net_free(&Hclient.Context);
+        mbedtls_ssl_free(&Hclient.ssl);
+        mbedtls_ssl_config_free(&Hclient.conf);
+        mbedtls_ctr_drbg_free(&Hclient.ctr_drbg);
+        mbedtls_entropy_free(&Hclient.entropy);
+      
         Hclient.KeepLooping = false;
     }
     else
