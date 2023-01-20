@@ -55,6 +55,11 @@ int TLS_Client::Connect(const char *host, uint16_t port)
 
     snprintf(port_str, sizeof(port_str), "%d", port);
 
+    mbedtls_net_init(&Hclient.Context);
+    mbedtls_ssl_init(&Hclient.ssl);
+    mbedtls_ssl_config_init(&Hclient.conf);
+    mbedtls_ctr_drbg_init(&Hclient.ctr_drbg);
+
 
     mbedtls_entropy_init(&Hclient.entropy);
     if ((ret = mbedtls_ctr_drbg_seed(&Hclient.ctr_drbg, mbedtls_entropy_func, &Hclient.entropy,
@@ -76,7 +81,7 @@ int TLS_Client::Connect(const char *host, uint16_t port)
     }
 
 
-        fflush(stdout);
+    fflush(stdout);
 
     if ((ret = mbedtls_ssl_config_defaults(&Hclient.conf,
                                            MBEDTLS_SSL_IS_CLIENT,
@@ -108,6 +113,7 @@ int TLS_Client::Connect(const char *host, uint16_t port)
      */
     mbedtls_printf("  . Performing the SSL/TLS handshake...");
     fflush(stdout);
+    
 
     if ((ret = mbedtls_ssl_handshake(&Hclient.ssl)) != 0) {
         if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -117,131 +123,132 @@ int TLS_Client::Connect(const char *host, uint16_t port)
 
         status = -1;
         mbedtls_ssl_close_notify(&Hclient.ssl);
+        Hclient.KeepLooping = false;
     }
     else
     {
 
-    mbedtls_printf(" ok\n");
-
-    
-    pthread_mutex_init(&Hclient.Mutex, NULL);
-
-    status = pthread_create(&ReceiveTask, NULL, [] (void *args)->void*
-    {
-        ClientArg *hcl = (ClientArg *) args;
-        char buf[BUFFER_SIZE];
-        #if defined(_WIN32) || defined(_WIN64)
-        int err;
-        #endif
-        int len = 0;
-        int ret = 0;
-        hcl->KeepLooping = true;
-        printf("Receive thread was started\r\n");
-
-        do
-        {
-
-
-            len = sizeof(buf) - 1;
-            memset(buf, 0, sizeof(buf));
-            ret = mbedtls_ssl_read(&hcl->ssl, (unsigned char *) buf, len);
-
-            if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-                continue;
-            }
-
-            if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
-                hcl->KeepLooping = false;
-            }
-            else if (ret < 0) {
-                mbedtls_printf("failed\n  ! mbedtls_ssl_read returned %d\n\n", ret);
-                hcl->KeepLooping = false;
-            }
-
-            else if (ret == 0) {
-                mbedtls_printf("\n\nEOF\n\n");
-                hcl->KeepLooping = false;
-            }
-            else
-            {
-                len = ret;
-                mbedtls_printf(" %d bytes read\n\n%s", len, (char *) buf);
-
-                if (hcl->Observer)
-                {
-                    hcl->Observer->OnTcpReceived(hcl->Self, (uint8_t *)buf, len);
-                }
-            }
-            pthread_mutex_unlock(&hcl->Mutex);
-        }
-        while (hcl->KeepLooping);
+        mbedtls_printf(" ok\n");
 
         
-        mbedtls_ssl_close_notify(&hcl->ssl);
+        pthread_mutex_init(&Hclient.Mutex, NULL);
 
-        mbedtls_net_free(&hcl->Context);
-
-        mbedtls_ssl_free(&hcl->ssl);
-        mbedtls_ssl_config_free(&hcl->conf);
-        mbedtls_ctr_drbg_free(&hcl->ctr_drbg);
-        mbedtls_entropy_free(&hcl->entropy);
-
-        hcl->Context.fd = SOCKET_ERROR;
-
-        printf("Receive thread was stopped\r\n");
-
-        return SUCCESS;
-    }
-    , &Hclient);
-
-
-    if (status != 0) 
-    {
-        printf("main error: can't create thread, status = %d\n", status);
-        exit(ERROR_CREATE_THREAD);
-        return -1;
-    }
-
-
-    status = pthread_create(&PollTask, NULL, [] (void *args)->void*
-    {
-        ClientArg *hcl = (ClientArg *) args;
-        printf("Poll thread was started\r\n");
-
-        while(hcl->KeepLooping)
+        status = pthread_create(&ReceiveTask, NULL, [] (void *args)->void*
         {
-            sleep(1);
-            pthread_mutex_lock(&hcl->Mutex);
+            ClientArg *hcl = (ClientArg *) args;
+            char buf[BUFFER_SIZE];
+            #if defined(_WIN32) || defined(_WIN64)
+            int err;
+            #endif
+            int len = 0;
+            int ret = 0;
+            hcl->KeepLooping = true;
+            printf("Receive thread was started\r\n");
+
+            do
+            {
+
+
+                len = sizeof(buf) - 1;
+                memset(buf, 0, sizeof(buf));
+                ret = mbedtls_ssl_read(&hcl->ssl, (unsigned char *) buf, len);
+
+                if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                    continue;
+                }
+
+                if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+                    hcl->KeepLooping = false;
+                }
+                else if (ret < 0) {
+                    mbedtls_printf("failed\n  ! mbedtls_ssl_read returned %d\n\n", ret);
+                    hcl->KeepLooping = false;
+                }
+
+                else if (ret == 0) {
+                    mbedtls_printf("\n\nEOF\n\n");
+                    hcl->KeepLooping = false;
+                }
+                else
+                {
+                    len = ret;
+                    mbedtls_printf(" %d bytes read\n\n%s", len, (char *) buf);
+
+                    if (hcl->Observer)
+                    {
+                        hcl->Observer->OnTcpReceived(hcl->Self, (uint8_t *)buf, len);
+                    }
+                }
+                pthread_mutex_unlock(&hcl->Mutex);
+            }
+            while (hcl->KeepLooping);
+
+            
+            mbedtls_ssl_close_notify(&hcl->ssl);
+
+            mbedtls_net_free(&hcl->Context);
+
+            mbedtls_ssl_free(&hcl->ssl);
+            mbedtls_ssl_config_free(&hcl->conf);
+            mbedtls_ctr_drbg_free(&hcl->ctr_drbg);
+            mbedtls_entropy_free(&hcl->entropy);
+
+            hcl->Context.fd = SOCKET_ERROR;
+
+            printf("Receive thread was stopped\r\n");
+
+            return SUCCESS;
+        }
+        , &Hclient);
+
+
+        if (status != 0) 
+        {
+            printf("main error: can't create thread, status = %d\n", status);
+            exit(ERROR_CREATE_THREAD);
+            return -1;
+        }
+
+
+        status = pthread_create(&PollTask, NULL, [] (void *args)->void*
+        {
+            ClientArg *hcl = (ClientArg *) args;
+            printf("Poll thread was started\r\n");
+
+            while(hcl->KeepLooping)
+            {
+                sleep(1);
+                pthread_mutex_lock(&hcl->Mutex);
+                if (hcl->Observer != nullptr)
+                {
+                    hcl->Observer->TcpPollConnectionl(hcl->Self);
+                }
+                
+                pthread_mutex_unlock(&hcl->Mutex);
+            }
+
             if (hcl->Observer != nullptr)
             {
-                hcl->Observer->TcpPollConnectionl(hcl->Self);
+                hcl->Observer->OnTcpDisconnected(hcl->Self);
             }
-            
-            pthread_mutex_unlock(&hcl->Mutex);
+            hcl->KeepLooping = false;
+            pthread_mutex_destroy(&hcl->Mutex);
+            printf("Connection closed\r\n");
+            return SUCCESS;
         }
+        , &Hclient);
 
-        if (hcl->Observer != nullptr)
+        if (status != 0) 
         {
-            hcl->Observer->OnTcpDisconnected(hcl->Self);
+            printf("main error: can't create thread, status = %d\n", status);
+            exit(ERROR_CREATE_THREAD);
+            return -1;
         }
-        hcl->KeepLooping = false;
-        pthread_mutex_destroy(&hcl->Mutex);
-        printf("Connection closed\r\n");
-        return SUCCESS;
-    }
-    , &Hclient);
 
-    if (status != 0) 
-    {
-        printf("main error: can't create thread, status = %d\n", status);
-        exit(ERROR_CREATE_THREAD);
-        return -1;
-    }
-
-    if (Hclient.Observer != nullptr)
-    {
-        Hclient.Observer->OnTcpConnected(this);
-    }
+        if (Hclient.Observer != nullptr)
+        {
+            Hclient.Observer->OnTcpConnected(this);
+        }
 
     
     }
@@ -261,12 +268,13 @@ int TLS_Client::Send(uint8_t *data, uint32_t len)
     int ret = 0;
 
 
-    while ((ret = mbedtls_ssl_write(&Hclient.ssl, data, len)) <= 0) 
+    if (ret = mbedtls_ssl_write(&Hclient.ssl, data, len) <= 0)
     {
         if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
         {
             mbedtls_printf(" failed\n  ! mbedtls_ssl_write returned %d\n\n", ret);
         }
+        Hclient.KeepLooping = false;
     }
 
     return err;

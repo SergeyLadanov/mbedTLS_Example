@@ -69,7 +69,7 @@ private:
 
         bool IsConnected()
         {
-            return (Context.fd != SOCKET_ERROR);
+            return KeepLooping;
         }
     };
 
@@ -85,11 +85,6 @@ public:
         memset(&Hclient, 0, sizeof(ClientArg));
         Hclient.Context.fd = SOCKET_ERROR;
         Hclient.Self = this;
-
-        mbedtls_net_init(&Hclient.Context);
-        mbedtls_ssl_init(&Hclient.ssl);
-        mbedtls_ssl_config_init(&Hclient.conf);
-        mbedtls_ctr_drbg_init(&Hclient.ctr_drbg);
     }
     int Connect(const char *host, uint16_t port);
     bool IsConnected(void);
